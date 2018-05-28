@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"log"
 	"html/template"
+	"regexp"
 )
 
 type Page struct{
@@ -14,6 +15,7 @@ type Page struct{
 }
 
 var templates = template.Must(template.ParseFiles("edit.html", "view.html"))
+var validPath = regexp.MustCompile("^/(edit|save|view)/([a-zA-Z0-9]+)$")
 
 func (p *Page) save() error{
 	filename := p.Title + ".txt"
@@ -29,6 +31,17 @@ func loadPage(title string) (*Page, error){
 	return &Page{Title: title, Body:body}, nil
 }
 
+func makeHandler(fn func(http.ResponseWriter, *http.Request, string)) http.HandlerFunc{
+	return func(w http.ResponseWriter, r *http.Request){
+		m := validPath.FindStringSubmatch(r.URL.Path)
+		if m == nil{
+			http.NotFound(w, r)
+			return
+		}
+		fn(w, r, m[2])
+	}
+}
+
 func renderTemplate(w http.ResponseWriter, templ string, p *Page){
 	err := templates.ExecuteTemplate(w, templ + ".html", p)
 	if err != nil{
@@ -37,9 +50,8 @@ func renderTemplate(w http.ResponseWriter, templ string, p *Page){
 	}
 }
 
-func viewHandler(rsp http.ResponseWriter, r *http.Request){
+func viewHandler(rsp http.ResponseWriter, r *http.Request, title string){
 	//rsp is repsonse, r is request
-	title := r.URL.Path[len("/view/"):]
 	p, err := loadPage(title)
 	if err != nil{
 		http.Redirect(rsp, r, "/edit/"+title, http.StatusFound)
@@ -51,8 +63,7 @@ func viewHandler(rsp http.ResponseWriter, r *http.Request){
 	//fmt.Fprintf(rsp, "<h1>%s</h1><div>%s</div>", p.Title, p.Body)
 }
 
-func editHandler(rsp http.ResponseWriter, r *http.Request){
-	title := r.URL.Path[len("/edit/"):]
+func editHandler(rsp http.ResponseWriter, r *http.Request, title string){
 	p, err := loadPage(title)
 	if err != nil{
 		p = &Page{Title: title}
@@ -62,8 +73,7 @@ func editHandler(rsp http.ResponseWriter, r *http.Request){
 //	t.Excecute(rsp, p)
 }
 
-func saveHandler(rsp http.ResponseWriter, req *http.Request){
-	title := req.URL.Path[len("/save/"):]
+func saveHandler(rsp http.ResponseWriter, req *http.Request, title string){
 	body := req.FormValue("body")
 	p := &Page{Title:title, Body:[]byte(body)}
 	err := p.save()
@@ -81,9 +91,9 @@ func main(){
 //	p2, _ := loadPage("TestPage")
 //
 //	fmt.Println(string(p2.Body))
-	http.HandleFunc("/view/", viewHandler) //handle all requests with view to handler viewHandler
-	http.HandleFunc("/edit/", editHandler)
-	http.HandleFunc("/save/", saveHandler)
+	http.HandleFunc("/view/", makeHandler(viewHandler)) //handle all requests with view to handler viewHandler
+	http.HandleFunc("/edit/", makeHandler(editHandler))
+	http.HandleFunc("/save/", makeHandler(saveHandler))
 	log.Fatal(http.ListenAndServe(":8080", nil))//listen on port 8080
 	fmt.Println("...")
 }
